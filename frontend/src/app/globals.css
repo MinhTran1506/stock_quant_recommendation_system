@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0f172a;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #475569;
+  }
+}
+
+@layer utilities {
+  /* Mono font for prices and numbers */
+  .font-price {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  /* Truncate with tooltip on overflow */
+  .truncate-tooltip {
+    @apply truncate cursor-default;
+  }
+
+  /* Skeleton shimmer */
+  .skeleton {
+    @apply animate-pulse bg-gray-800 rounded;
+  }
+
+  /* Score gradient bar fill */
+  .score-fill-green  { background: linear-gradient(90deg, #16a34a, #22c55e); }
+  .score-fill-yellow { background: linear-gradient(90deg, #ca8a04, #eab308); }
+  .score-fill-red    { background: linear-gradient(90deg, #b91c1c, #ef4444); }
+}

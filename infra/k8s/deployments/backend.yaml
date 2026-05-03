@@ -1,0 +1,140 @@
+# infra/k8s/deployments/backend.yaml — FastAPI backend deployment
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hft-backend
+  namespace: hft-platform
+  labels:
+    app: hft-backend
+    tier: api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hft-backend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: hft-backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: hft-backend-sa
+      containers:
+        - name: backend
+          image: hft-platform/backend:latest
+          imagePullPolicy: Always
+          command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000",
+                    "--workers", "4", "--loop", "uvloop"]
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: APP_ENV
+              value: "production"
+            - name: LIVE_TRADING_ENABLED
+              value: "false"    # NEVER set to true without regulatory clearance
+          envFrom:
+            - secretRef:
+                name: hft-platform-secrets
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 5
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+# Model inference deployment (GPU-capable for TFT/N-BEATS inference)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hft-model-server
+  namespace: hft-platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hft-model-server
+  template:
+    metadata:
+      labels:
+        app: hft-model-server
+    spec:
+      containers:
+        - name: model-server
+          image: hft-platform/backend:latest
+          command: ["python", "-m", "models.inference_server"]
+          ports:
+            - containerPort: 8001
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "4Gi"
+              nvidia.com/gpu: "0"   # set to "1" if GPU nodes available
+            limits:
+              cpu: "4000m"
+              memory: "16Gi"
+              nvidia.com/gpu: "0"
+          envFrom:
+            - secretRef:
+                name: hft-platform-secrets
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+---
+# HPA for backend
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hft-backend-hpa
+  namespace: hft-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hft-backend
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80

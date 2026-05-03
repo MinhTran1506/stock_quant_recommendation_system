@@ -1,0 +1,165 @@
+# infra/k8s/services/services.yaml — All Kubernetes service definitions
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hft-platform
+  labels:
+    app.kubernetes.io/name: hft-platform
+    app.kubernetes.io/part-of: hft-platform
+
+---
+# Backend API service (internal + external via Ingress)
+apiVersion: v1
+kind: Service
+metadata:
+  name: hft-backend
+  namespace: hft-platform
+  labels:
+    app: hft-backend
+spec:
+  selector:
+    app: hft-backend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+      protocol: TCP
+  type: ClusterIP
+
+---
+# Model server (internal only)
+apiVersion: v1
+kind: Service
+metadata:
+  name: hft-model-server
+  namespace: hft-platform
+spec:
+  selector:
+    app: hft-model-server
+  ports:
+    - name: grpc
+      port: 8001
+      targetPort: 8001
+  type: ClusterIP
+
+---
+# Frontend
+apiVersion: v1
+kind: Service
+metadata:
+  name: hft-frontend
+  namespace: hft-platform
+spec:
+  selector:
+    app: hft-frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
+  type: ClusterIP
+
+---
+# MLflow tracking server
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow
+  namespace: hft-platform
+spec:
+  selector:
+    app: mlflow
+  ports:
+    - port: 5000
+      targetPort: 5000
+  type: ClusterIP
+
+---
+# Ingress (nginx-based, TLS termination at load balancer)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hft-ingress
+  namespace: hft-platform
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    # WebSocket support
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - hft.yourdomain.vn
+        - api.hft.yourdomain.vn
+      secretName: hft-tls-secret
+  rules:
+    - host: hft.yourdomain.vn
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hft-frontend
+                port:
+                  number: 80
+    - host: api.hft.yourdomain.vn
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hft-backend
+                port:
+                  number: 80
+
+---
+# ConfigMap for non-secret config
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hft-config
+  namespace: hft-platform
+data:
+  APP_ENV: "production"
+  LOG_LEVEL: "INFO"
+  LIVE_TRADING_ENABLED: "false"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka-service:9092"
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  POSTGRES_HOST: "timescaledb-service"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "hft_platform"
+  MLFLOW_TRACKING_URI: "http://mlflow:5000"
+  S3_ENDPOINT: "http://minio:9000"
+  S3_BUCKET_RAW: "hft-raw"
+  S3_BUCKET_FEATURES: "hft-features"
+  S3_BUCKET_MODELS: "hft-models"
+
+---
+# ServiceAccount for backend pods
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hft-backend-sa
+  namespace: hft-platform
+
+---
+# PodDisruptionBudget: ensure at least 1 backend pod during rolling updates
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hft-backend-pdb
+  namespace: hft-platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: hft-backend

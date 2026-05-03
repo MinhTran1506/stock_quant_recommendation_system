@@ -1,0 +1,189 @@
+# monitoring/alert_rules.yml — Prometheus alerting rules
+#
+# Alert severity:
+#   critical — page on-call immediately (P1)
+#   warning  — notify Slack (P2)
+#   info     — log only (P3)
+
+groups:
+  # ── Data pipeline alerts ──────────────────────────────────────────────────
+  - name: data_pipeline
+    interval: 60s
+    rules:
+      - alert: EODIngestionLag
+        expr: hft_data_ingest_lag_seconds{data_type="eod_prices"} > 7200
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "EOD price ingestion lagging"
+          description: >
+            EOD prices have not been ingested for more than 2 hours.
+            Provider: {{ $labels.provider }}.
+            Last ingest: {{ humanizeDuration $value }} ago.
+
+      - alert: IntradayIngestionStopped
+        expr: hft_data_ingest_lag_seconds{data_type="intraday"} > 600
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Intraday data feed stopped"
+          description: >
+            No intraday data for {{ humanizeDuration $value }}.
+            Check Kafka consumer and provider API connectivity.
+
+      - alert: KafkaConsumerLagHigh
+        expr: hft_kafka_consumer_lag_messages > 10000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka consumer falling behind"
+          description: >
+            Topic {{ $labels.topic }} has {{ $value }} messages backlogged.
+            Consumer group: {{ $labels.consumer_group }}.
+
+  # ── Model health alerts ───────────────────────────────────────────────────
+  - name: model_health
+    interval: 300s
+    rules:
+      - alert: ModelPredictionDriftHigh
+        expr: hft_model_prediction_drift > 0.4
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Model prediction distribution drift detected"
+          description: >
+            Model {{ $labels.model_name }} has PSI drift score {{ $value | humanize }}.
+            Threshold: 0.4. Consider triggering retraining.
+
+      - alert: ModelDirectionalAccuracyLow
+        expr: hft_model_directional_accuracy{horizon_days="5"} < 0.50
+        for: 6h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Model directional accuracy below random"
+          description: >
+            Model {{ $labels.model_name }} (H={{ $labels.horizon_days }})
+            directional accuracy is {{ $value | humanizePercentage }}.
+            Consider retraining or reviewing features.
+
+      - alert: ModelInferenceLatencyHigh
+        expr: histogram_quantile(0.99, hft_model_inference_duration_seconds_bucket) > 2.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Model inference P99 latency > 2s"
+          description: >
+            {{ $labels.model_name }} inference p99={{ $value | humanizeDuration }}.
+            May impact real-time scoring.
+
+      - alert: NoPredictionsGenerated
+        expr: increase(hft_model_inference_duration_seconds_count[1h]) == 0
+        for: 2h
+        labels:
+          severity: critical
+        annotations:
+          summary: "No model inferences in the last 2 hours"
+          description: >
+            The scoring pipeline may be down. Check Airflow DAG status
+            and model server health.
+
+  # ── API health alerts ─────────────────────────────────────────────────────
+  - name: api_health
+    interval: 30s
+    rules:
+      - alert: APIErrorRateHigh
+        expr: >
+          sum(rate(hft_api_requests_total{status_code=~"5.."}[5m]))
+          /
+          sum(rate(hft_api_requests_total[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API error rate > 5%"
+          description: >
+            {{ $value | humanizePercentage }} of API requests returning 5xx.
+            Investigate backend logs immediately.
+
+      - alert: APILatencyP99High
+        expr: >
+          histogram_quantile(0.99,
+            sum(rate(hft_api_request_duration_seconds_bucket[5m])) by (le, endpoint)
+          ) > 3.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API P99 latency > 3s"
+          description: >
+            Endpoint {{ $labels.endpoint }} p99={{ $value | humanizeDuration }}.
+
+  # ── Portfolio / trading alerts ────────────────────────────────────────────
+  - name: trading
+    interval: 60s
+    rules:
+      - alert: PaperPortfolioLargeDrawdown
+        expr: hft_paper_portfolio_pnl_pct < -15
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Paper portfolio drawdown exceeds 15%"
+          description: >
+            Portfolio {{ $labels.portfolio_id }} P&L = {{ $value | humanizePercentage }}.
+            Review strategy parameters and risk controls.
+
+      - alert: OrderFillRateLow
+        expr: hft_order_fill_rate < 0.8
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Order fill rate below 80%"
+          description: >
+            Strategy {{ $labels.strategy_id }} fill rate = {{ $value | humanizePercentage }}.
+            Check execution adapter connectivity.
+
+  # ── Infrastructure alerts ─────────────────────────────────────────────────
+  - name: infrastructure
+    interval: 30s
+    rules:
+      - alert: DatabaseConnectionPoolExhausted
+        expr: pg_stat_activity_count > 90
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL connection pool near limit"
+          description: >
+            {{ $value }} active connections. Pool limit is ~100.
+            Risk of connection refusal.
+
+      - alert: RedisMemoryHigh
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis memory > 85% of limit"
+          description: >
+            Redis memory utilisation: {{ $value | humanizePercentage }}.
+            Risk of key eviction affecting feature cache.
+
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) < 0.10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk space < 10%"
+          description: >
+            Disk on {{ $labels.instance }} at
+            {{ $value | humanizePercentage }} free.
+            TimescaleDB compression may be blocked.
