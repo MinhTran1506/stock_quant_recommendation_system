@@ -122,17 +122,17 @@ class VectorBTEngine:
             close=prices,
             entries=entries,
             exits=exits,
-            init_cash=config.initial_capital,
+            init_cash=config.initial_capital / len(prices.columns),
             fees=config.commission_pct,
             slippage=config.slippage_pct,
             size=config.max_position_pct,         # fraction of capital per trade
             size_type="percent",
-            max_orders=config.max_positions,
+            max_orders=len(prices) * len(prices.columns) * 2,
             allow_partial=True,
             accumulate=False,
             sl_stop=config.stop_loss_pct,
             tp_stop=config.take_profit_pct,
-            freq="B",
+            freq="D",
         )
 
         return self._extract_results(pf, config, run_id)
@@ -141,26 +141,32 @@ class VectorBTEngine:
         self, pf: vbt.Portfolio, config: BacktestConfig, run_id: str
     ) -> BacktestResults:
         """Extract standardised metrics from a vectorbt Portfolio object."""
-        stats = pf.stats()
+        pf.stats()  # validate portfolio; result unused
         equity = pf.value()
+
+        # Multi-column portfolio (one column per ticker): aggregate to total value
+        if isinstance(equity, pd.DataFrame):
+            equity = equity.sum(axis=1)
+
+        # Drawdown computed from aggregated equity
+        dd = (equity / equity.cummax() - 1)
 
         # Equity curve
         equity_curve = [
-            {"date": str(d.date()), "value": float(v)}
+            {"date": str(pd.Timestamp(d).date()), "value": float(v)}
             for d, v in equity.items()
         ]
 
         # Drawdown series
-        dd = pf.drawdown()
         drawdown_series = [
-            {"date": str(d.date()), "drawdown": float(v)}
+            {"date": str(pd.Timestamp(d).date()), "drawdown": float(v)}
             for d, v in dd.items()
         ]
 
         # Monthly returns
         monthly_ret = equity.resample("ME").last().pct_change().dropna()
         monthly_returns = [
-            {"month": str(d.date()), "return": float(v)}
+            {"month": str(pd.Timestamp(d).date()), "return": float(v)}
             for d, v in monthly_ret.items()
         ]
 

@@ -52,7 +52,7 @@ def upgrade() -> None:
     # ── eod_prices (TimescaleDB hypertable) ────────────────────────────────────
     op.create_table(
         "eod_prices",
-        sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+        sa.Column("id", sa.BigInteger, sa.Identity(), nullable=False),
         sa.Column("stock_id", UUID(as_uuid=True),
                   sa.ForeignKey("stocks.id"), nullable=False),
         sa.Column("date", sa.DateTime, nullable=False),
@@ -63,6 +63,7 @@ def upgrade() -> None:
         sa.Column("volume", sa.BigInteger),
         sa.Column("adjusted_close", sa.Numeric(15, 2)),
         sa.Column("source", sa.String(50)),
+        sa.PrimaryKeyConstraint("id", "date"),
     )
     op.create_unique_constraint("uq_eod_stock_date", "eod_prices", ["stock_id", "date"])
     op.create_index("ix_eod_stock_date", "eod_prices", ["stock_id", "date"])
@@ -86,7 +87,7 @@ def upgrade() -> None:
     # ── intraday_prices (TimescaleDB hypertable) ───────────────────────────────
     op.create_table(
         "intraday_prices",
-        sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+        sa.Column("id", sa.BigInteger, sa.Identity(), nullable=False),
         sa.Column("stock_id", UUID(as_uuid=True),
                   sa.ForeignKey("stocks.id"), nullable=False),
         sa.Column("timestamp", sa.DateTime, nullable=False),
@@ -96,6 +97,7 @@ def upgrade() -> None:
         sa.Column("low", sa.Numeric(15, 2)),
         sa.Column("close", sa.Numeric(15, 2), nullable=False),
         sa.Column("volume", sa.BigInteger),
+        sa.PrimaryKeyConstraint("id", "timestamp"),
     )
     op.create_unique_constraint(
         "uq_intraday", "intraday_prices", ["stock_id", "timestamp", "interval_minutes"]
@@ -117,7 +119,7 @@ def upgrade() -> None:
     # ── orderbook_snapshots ────────────────────────────────────────────────────
     op.create_table(
         "orderbook_snapshots",
-        sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+        sa.Column("id", sa.BigInteger, sa.Identity(), nullable=False),
         sa.Column("stock_id", UUID(as_uuid=True),
                   sa.ForeignKey("stocks.id"), nullable=False),
         sa.Column("timestamp", sa.DateTime, nullable=False),
@@ -125,6 +127,7 @@ def upgrade() -> None:
         sa.Column("asks", JSON, nullable=False, default=list),
         sa.Column("mid_price", sa.Numeric(15, 2)),
         sa.Column("spread", sa.Numeric(15, 4)),
+        sa.PrimaryKeyConstraint("id", "timestamp"),
     )
     op.create_index("ix_ob_stock_ts", "orderbook_snapshots", ["stock_id", "timestamp"])
     op.execute(
@@ -193,7 +196,7 @@ def upgrade() -> None:
     # ── predictions (TimescaleDB hypertable) ───────────────────────────────────
     op.create_table(
         "predictions",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+        sa.Column("id", UUID(as_uuid=True), nullable=False, default=uuid.uuid4),
         sa.Column("stock_id", UUID(as_uuid=True),
                   sa.ForeignKey("stocks.id"), nullable=False),
         sa.Column("model_version_id", UUID(as_uuid=True),
@@ -208,6 +211,7 @@ def upgrade() -> None:
         sa.Column("score", sa.Float),
         sa.Column("feature_importances", JSON, default=dict),
         sa.Column("raw_outputs", JSON, default=dict),
+        sa.PrimaryKeyConstraint("id", "generated_at"),
     )
     op.create_index(
         "ix_pred_stock_generated", "predictions", ["stock_id", "generated_at"]

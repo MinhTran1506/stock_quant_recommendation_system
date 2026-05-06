@@ -95,8 +95,11 @@ class FactorModel:
         cfg = self.config
         result_rows = []
 
-        tickers = [t for t in prices.columns
-                   if t in (fundamentals.index if fundamentals is not None else prices.columns)]
+        tickers = (
+            prices.columns.tolist()
+            if (fundamentals is None or fundamentals.empty)
+            else [t for t in prices.columns if t in fundamentals.index]
+        )
 
         # ── Individual factor computation ─────────────────────────────
         mom_factor      = self._momentum_factor(prices, months=cfg.momentum_months)
@@ -157,7 +160,7 @@ class FactorModel:
         mn = df["composite_score"].min()
         mx = df["composite_score"].max()
         df["score"] = ((df["composite_score"] - mn) / max(mx - mn, 1e-8) * 100).round(2)
-        df["rank"] = df["score"].rank(ascending=False).astype(int)
+        df["rank"] = df["score"].rank(ascending=False, method="first").astype(int)
         return df.sort_values("score", ascending=False)
 
     def long_short_portfolio(

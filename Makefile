@@ -139,18 +139,19 @@ kafka-topics:
 	@echo "✅  Kafka topics created"
 
 minio-buckets:
-	$(DOCKER_COMPOSE) exec minio mc alias set local http://localhost:9000 minioadmin minioadmin
-	$(DOCKER_COMPOSE) exec minio mc mb --ignore-existing local/hft-raw
-	$(DOCKER_COMPOSE) exec minio mc mb --ignore-existing local/hft-features
-	$(DOCKER_COMPOSE) exec minio mc mb --ignore-existing local/hft-models
+	@. ./.env && \
+	docker compose exec minio mc alias set local http://localhost:9000 $$S3_ACCESS_KEY $$S3_SECRET_KEY && \
+	docker compose exec minio mc mb --ignore-existing local/hft-raw && \
+	docker compose exec minio mc mb --ignore-existing local/hft-features && \
+	docker compose exec minio mc mb --ignore-existing local/hft-models
 	@echo "✅  MinIO buckets created"
 
 # ─── Testing & quality ────────────────────────────────────────────────────────
 test:
-	$(PYTEST) backend/tests/ -v --tb=short
+	$(PYTEST) tests/ -v --tb=short
 
 test-cov:
-	$(PYTEST) backend/tests/ -v --cov=. --cov-report=term-missing --cov-report=html
+	$(PYTEST) tests/ -v --cov=. --cov-report=term-missing --cov-report=html
 
 lint:
 	$(BACKEND) ruff check .
@@ -172,13 +173,16 @@ score:
 
 # ─── Docker build ─────────────────────────────────────────────────────────────
 build:
-	$(DOCKER_COMPOSE) build --no-cache
+	$(DOCKER_COMPOSE) build
 
 build-backend:
-	$(DOCKER_COMPOSE) build --no-cache backend
+	$(DOCKER_COMPOSE) build backend
 
 build-frontend:
-	$(DOCKER_COMPOSE) build --no-cache frontend
+	$(DOCKER_COMPOSE) build frontend
+
+build-clean:
+	$(DOCKER_COMPOSE) build --no-cache
 
 # ─── Kubernetes ───────────────────────────────────────────────────────────────
 k8s-apply:
@@ -241,7 +245,7 @@ quant-dag-trigger:
 	$(DOCKER_COMPOSE) exec airflow airflow dags trigger quant_daily_signals
 
 test-quant:
-	$(PYTEST) backend/tests/test_quant.py -v --tb=short
+	$(PYTEST) tests/test_quant.py -v --tb=short
 
 train-rl:
 	$(BACKEND) python -c "from quant.strategies.rl_agent import RLPortfolioAgent; import pandas as pd, numpy as np; tickers=['VNM','VIC','HPG','FPT','TCB','MBB','VPB','STB']; dates=pd.bdate_range('2020-01-01','2024-01-01'); prices=pd.DataFrame(np.exp(np.random.normal(0,.015,size=(len(dates),len(tickers))).cumsum(0))*10000,index=dates,columns=tickers); agent=RLPortfolioAgent(len(tickers),tickers); agent.train(prices,tickers,n_episodes=50)"

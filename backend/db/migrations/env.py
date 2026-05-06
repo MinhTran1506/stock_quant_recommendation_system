@@ -7,7 +7,7 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool, text
+from sqlalchemy import engine_from_config, pool
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 import sys, os
@@ -27,37 +27,6 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-HYPERTABLE_SETUP = """
--- Convert time-series tables to TimescaleDB hypertables
-SELECT create_hypertable('eod_prices', 'date',
-    if_not_exists => TRUE, migrate_data => TRUE);
-
-SELECT create_hypertable('intraday_prices', 'timestamp',
-    chunk_time_interval => INTERVAL '1 hour',
-    if_not_exists => TRUE, migrate_data => TRUE);
-
-SELECT create_hypertable('orderbook_snapshots', 'timestamp',
-    chunk_time_interval => INTERVAL '1 hour',
-    if_not_exists => TRUE, migrate_data => TRUE);
-
-SELECT create_hypertable('predictions', 'generated_at',
-    if_not_exists => TRUE, migrate_data => TRUE);
-
--- Compression policies
-ALTER TABLE eod_prices SET (
-    timescaledb.compress,
-    timescaledb.compress_orderby = 'date DESC',
-    timescaledb.compress_segmentby = 'stock_id'
-);
-SELECT add_compression_policy('eod_prices', INTERVAL '30 days', if_not_exists => TRUE);
-
-ALTER TABLE intraday_prices SET (
-    timescaledb.compress,
-    timescaledb.compress_orderby = 'timestamp DESC',
-    timescaledb.compress_segmentby = 'stock_id'
-);
-SELECT add_compression_policy('intraday_prices', INTERVAL '7 days', if_not_exists => TRUE);
-"""
 
 
 def run_migrations_offline() -> None:
@@ -77,11 +46,6 @@ def do_run_migrations(connection):
     context.configure(connection=connection, target_metadata=target_metadata)
     with context.begin_transaction():
         context.run_migrations()
-    # After all tables created, set up hypertables
-    try:
-        connection.execute(text(HYPERTABLE_SETUP))
-    except Exception as e:
-        print(f"Warning: hypertable setup partially failed (may already exist): {e}")
 
 
 async def run_async_migrations() -> None:

@@ -4,7 +4,7 @@ airflow/dags/daily_pipeline.py — Daily market data + model update pipeline.
 DAG schedule: weekdays at 18:30 ICT (after HOSE closes at 15:00 ICT)
 
 Stages:
-  1. ingest_eod       — Fetch yesterday's EOD prices from Vietstock / FiinGroup
+  1. ingest_eod       — Fetch yesterday's EOD prices from vnstock
   2. ingest_news      — Fetch latest news, publish to Kafka for NLP processing
   3. compute_features — Compute all features, cache in Redis + archive to S3
   4. score_stocks     — Run meta-model inference, save predictions to DB
@@ -42,13 +42,13 @@ with DAG(
 
     # ── Task functions ────────────────────────────────────────────────────
     def ingest_eod(**context):
-        """Fetch EOD prices for all active stocks from Vietstock + FiinGroup."""
+        """Fetch EOD prices for all active stocks from vnstock."""
         import asyncio
         from datetime import date
         import sys
         sys.path.insert(0, "/opt/airflow/plugins/backend")
 
-        from data.ingestion.vietstock import VietstockProvider
+        from data.ingestion.vnstock_provider import VnstockProvider
         from db.session import init_db, get_db
         from db.models import Stock, EODPrice
         from sqlalchemy import select
@@ -56,7 +56,7 @@ with DAG(
 
         async def _run():
             await init_db()
-            provider = VietstockProvider()
+            provider = VnstockProvider()
             trade_date = context["logical_date"].date()
 
             async for session in get_db():
@@ -100,11 +100,11 @@ with DAG(
         import sys
         sys.path.insert(0, "/opt/airflow/plugins/backend")
 
-        from data.ingestion.vietstock import VietstockProvider
+        from data.ingestion.vnstock_provider import VnstockProvider
         from data.kafka.consumer import KafkaProducerManager
 
         async def _run():
-            provider = VietstockProvider()
+            provider = VnstockProvider()
             kafka = KafkaProducerManager()
             await kafka.start()
 

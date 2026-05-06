@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from sqlalchemy import (
     BigInteger, Boolean, Column, DateTime, Enum, Float,
-    ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint,
+    ForeignKey, Identity, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -100,9 +100,9 @@ class Stock(Base):
 class EODPrice(Base):
     __tablename__ = "eod_prices"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(BigInteger, Identity(), primary_key=True)
     stock_id = Column(UUID(as_uuid=True), ForeignKey("stocks.id"), nullable=False)
-    date = Column(DateTime, nullable=False)
+    date = Column(DateTime, primary_key=True, nullable=False)
     open = Column(Numeric(15, 2))
     high = Column(Numeric(15, 2))
     low = Column(Numeric(15, 2))
@@ -123,9 +123,9 @@ class EODPrice(Base):
 class IntradayPrice(Base):
     __tablename__ = "intraday_prices"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(BigInteger, Identity(), primary_key=True)
     stock_id = Column(UUID(as_uuid=True), ForeignKey("stocks.id"), nullable=False)
-    timestamp = Column(DateTime, nullable=False)
+    timestamp = Column(DateTime, primary_key=True, nullable=False)
     interval_minutes = Column(Integer, nullable=False, default=1)
     open = Column(Numeric(15, 2))
     high = Column(Numeric(15, 2))
@@ -145,9 +145,9 @@ class IntradayPrice(Base):
 class OrderBookSnapshot(Base):
     __tablename__ = "orderbook_snapshots"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(BigInteger, Identity(), primary_key=True)
     stock_id = Column(UUID(as_uuid=True), ForeignKey("stocks.id"), nullable=False)
-    timestamp = Column(DateTime, nullable=False)
+    timestamp = Column(DateTime, primary_key=True, nullable=False)
     # Store as JSON: [{price, volume, side}, ...]
     bids = Column(JSON, nullable=False, default=list)
     asks = Column(JSON, nullable=False, default=list)
@@ -229,7 +229,7 @@ class Prediction(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     stock_id = Column(UUID(as_uuid=True), ForeignKey("stocks.id"), nullable=False)
     model_version_id = Column(UUID(as_uuid=True), ForeignKey("model_versions.id"))
-    generated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    generated_at = Column(DateTime, primary_key=True, default=datetime.utcnow, nullable=False)
     target_date = Column(DateTime, nullable=False)    # date being predicted
     horizon_days = Column(Integer, nullable=False)
     predicted_return = Column(Float)

@@ -1,4 +1,4 @@
-version: "3.9"
+# version: "3.9"
 
 # ─── Shared network ────────────────────────────────────────────────────────────
 networks:
@@ -131,6 +131,7 @@ services:
     env_file: .env
     volumes:
       - ./backend:/app
+      - ./scripts:/app/scripts
     ports:
       - "8000:8000"
     depends_on:
@@ -151,6 +152,7 @@ services:
     env_file: .env
     volumes:
       - ./backend:/app
+      - ./scripts:/app/scripts
     depends_on:
       - backend
     networks: [hft_net]

@@ -143,7 +143,9 @@ class BaseDataProvider(ABC):
             f"{partition.year}/{partition.month:02d}/{partition.day:02d}/"
             f"{ticker_part}{ts.strftime('%H%M%S%f')}.json.gz"
         )
-        compressed = gzip.compress(json.dumps(data).encode("utf-8"))
+        compressed = gzip.compress(
+            json.dumps(data, default=str).encode("utf-8")
+        )
         try:
             self._s3.put_object(
                 Bucket=settings.s3_bucket_raw,

@@ -36,7 +36,7 @@ def upgrade() -> None:
         sa.Column("is_active", sa.Boolean, default=True),
         sa.Column("discovered_at", sa.DateTime, server_default=sa.func.now()),
         sa.Column("last_validated_at", sa.DateTime),
-        sa.Column("metadata_", sa.String("metadata"), type_=JSON, default=dict),
+        sa.Column("metadata", JSON, default=dict),
     )
     op.create_unique_constraint(
         "uq_quant_pairs_tickers", "quant_pairs", ["ticker_a", "ticker_b"]
@@ -46,7 +46,7 @@ def upgrade() -> None:
     # ── quant_signals (TimescaleDB hypertable) ─────────────────────────────────
     op.create_table(
         "quant_signals",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+        sa.Column("id", UUID(as_uuid=True), nullable=False, default=uuid.uuid4),
         sa.Column("ticker", sa.String(20), nullable=False),
         sa.Column("strategy", sa.String(50), nullable=False),
         sa.Column("generated_at", sa.DateTime, nullable=False, server_default=sa.func.now()),
@@ -54,7 +54,8 @@ def upgrade() -> None:
         sa.Column("confidence", sa.Float),
         sa.Column("z_score", sa.Float),
         sa.Column("indicator_value", sa.Float),
-        sa.Column("metadata_", sa.String("metadata"), type_=JSON, default=dict),
+        sa.Column("metadata", JSON, default=dict),
+        sa.PrimaryKeyConstraint("id", "generated_at"),
     )
     op.create_index("ix_qs_ticker_strategy_time",
                     "quant_signals", ["ticker", "strategy", "generated_at"])
@@ -80,7 +81,7 @@ def upgrade() -> None:
     # ── quant_regime_snapshots (TimescaleDB hypertable) ────────────────────────
     op.create_table(
         "quant_regime_snapshots",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+        sa.Column("id", UUID(as_uuid=True), nullable=False, default=uuid.uuid4),
         sa.Column("snapshot_at", sa.DateTime, nullable=False, server_default=sa.func.now()),
         sa.Column("regime", sa.String(20), nullable=False),
         sa.Column("bull_prob", sa.Float),
@@ -89,6 +90,7 @@ def upgrade() -> None:
         sa.Column("momentum_scalar", sa.Float),
         sa.Column("vol_30d", sa.Float),
         sa.Column("trend_12m", sa.Float),
+        sa.PrimaryKeyConstraint("id", "snapshot_at"),
     )
     op.execute(
         "SELECT create_hypertable('quant_regime_snapshots', 'snapshot_at', "
@@ -98,7 +100,7 @@ def upgrade() -> None:
     # ── quant_risk_reports (TimescaleDB hypertable) ────────────────────────────
     op.create_table(
         "quant_risk_reports",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+        sa.Column("id", UUID(as_uuid=True), nullable=False, default=uuid.uuid4),
         sa.Column("portfolio_id", UUID(as_uuid=True),
                   sa.ForeignKey("portfolios.id"), nullable=True),
         sa.Column("snapshot_at", sa.DateTime, nullable=False, server_default=sa.func.now()),
@@ -112,6 +114,7 @@ def upgrade() -> None:
         sa.Column("beta", sa.Float),
         sa.Column("breaches", JSON, default=list),
         sa.Column("action_required", sa.String(20), default="NONE"),
+        sa.PrimaryKeyConstraint("id", "snapshot_at"),
     )
     op.execute(
         "SELECT create_hypertable('quant_risk_reports', 'snapshot_at', "
@@ -121,7 +124,7 @@ def upgrade() -> None:
     # ── quant_factor_scores ────────────────────────────────────────────────────
     op.create_table(
         "quant_factor_scores",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+        sa.Column("id", UUID(as_uuid=True), nullable=False, default=uuid.uuid4),
         sa.Column("ticker", sa.String(20), nullable=False),
         sa.Column("scored_at", sa.DateTime, nullable=False, server_default=sa.func.now()),
         sa.Column("composite_score", sa.Float),
@@ -133,6 +136,7 @@ def upgrade() -> None:
         sa.Column("factor_size", sa.Float),
         sa.Column("factor_growth", sa.Float),
         sa.Column("factor_liquidity", sa.Float),
+        sa.PrimaryKeyConstraint("id", "scored_at"),
     )
     op.create_index("ix_qfs_ticker_scored", "quant_factor_scores",
                     ["ticker", "scored_at"])

@@ -51,6 +51,21 @@ async def close_db() -> None:
         logger.info("Database connection pool closed")
 
 
+def AsyncSessionLocal() -> AsyncSession:
+    """
+    Return a new AsyncSession for use outside of FastAPI request scope.
+    The caller is responsible for committing and closing.
+
+    Usage::
+        async with AsyncSessionLocal() as session:
+            ...
+            await session.commit()
+    """
+    if _session_factory is None:
+        raise RuntimeError("Database not initialised. Call init_db() first.")
+    return _session_factory()
+
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
     FastAPI dependency — yields an async DB session per request.

@@ -6,14 +6,34 @@ from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
 
+import jwt as _jwt
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from jose import JWTError, jwt
 from passlib.context import CryptContext
+
+# Use PyJWT (already installed) — python-jose API-compatible subset
+JWTError = _jwt.PyJWTError
+
+
+class _JWTCompat:
+    """Thin shim so existing jwt.encode / jwt.decode calls work unchanged."""
+    @staticmethod
+    def encode(payload: dict, key: str, algorithm: str = "HS256") -> str:
+        return _jwt.encode(payload, key, algorithm=algorithm)
+
+    @staticmethod
+    def decode(token: str, key: str, algorithms: list) -> dict:
+        return _jwt.decode(token, key, algorithms=algorithms)
+
+
+jwt = _JWTCompat()
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from config import get_settings
 from db.models import User
@@ -21,6 +41,28 @@ from db.session import get_db
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
+
+
+# ─── JWT Middleware (used by main.py) ──────────────────────────────────────────
+class JWTAuthMiddleware(BaseHTTPMiddleware):
+    """
+    Starlette middleware that attaches the decoded JWT payload to request.state.
+    Routes that require authentication use the get_current_user dependency
+    instead — this middleware is for request-level context only.
+    """
+    EXEMPT_PATHS = {"/health", "/metrics", "/openapi.json", "/docs", "/redoc"}
+
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path in self.EXEMPT_PATHS or request.url.path.startswith("/api/v1/auth"):
+            return await call_next(request)
+        token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        if token:
+            try:
+                payload = jwt.decode(token, settings.app_secret_key, algorithms=["HS256"])
+                request.state.user_id = payload.get("sub")
+            except JWTError:
+                pass
+        return await call_next(request)
 
 # ─── Auth configuration ───────────────────────────────────────────────────────
 ALGORITHM = "HS256"
@@ -49,8 +91,13 @@ def create_token(subject: str, expires_delta: timedelta) -> str:
 # ─── FastAPI dependency: current user ─────────────────────────────────────────
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_db),
 ) -> User:
+    """
+    Validate the Bearer token first (raises 401 immediately if absent/invalid),
+    then look up the user in the DB.  Keeping DB out of the dependency signature
+    ensures FastAPI resolves token validation before opening a session — which
+    also means unauthenticated requests never touch the DB.
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired token",
@@ -64,8 +111,11 @@ async def get_current_user(
     except JWTError:
         raise credentials_exception
 
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
+    # Token is valid — now open a session to fetch the user row
+    from db.session import AsyncSessionLocal
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
     if user is None or not user.is_active:
         raise credentials_exception
     return user

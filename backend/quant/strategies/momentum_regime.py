@@ -81,7 +81,7 @@ class MarketRegimeDetector:
         self._model: Optional[hmm.GaussianHMM] = None
         self._state_map: Dict[int, MarketRegime] = {}
 
-    def fit(self, market_returns: pd.Series, min_obs: int = 252) -> "MarketRegimeDetector":
+    def fit(self, market_returns: pd.Series, min_obs: int = 100) -> "MarketRegimeDetector":
         """
         Fit HMM on market-level (e.g., VN-Index) returns.
         market_returns: daily log returns of the index.
@@ -160,8 +160,17 @@ class MarketRegimeDetector:
             MarketRegime.BEAR:     0.0,   # avoid momentum crashes
         }[dominant]
 
-        # Continuous scalar using bull probability
-        continuous_scalar = bull_p * 1.0 + side_p * 0.5 + bear_p * 0.0
+        # Continuous scalar using bull probability, capped by dominant-regime ceiling
+        # Also dampen by actual return level: HMM labels are relative, so when all
+        # returns are negative the "BULL" state is just the least-bad state.
+        # return_weight → 0 when window mean ≈ -2% daily, → 1 when ≈ +2% daily
+        window_mean = float(pd.Series(returns).mean())
+        return_weight = max(0.0, min(1.0, (window_mean + 0.02) / 0.04))
+        dominant_cap = scalar  # 0.0 for BEAR, 0.5 for SIDEWAYS, 1.0 for BULL
+        continuous_scalar = min(
+            dominant_cap,
+            (bull_p * 1.0 + side_p * 0.5 + bear_p * 0.0) * return_weight,
+        )
 
         vol_30d = float(pd.Series(returns).rolling(21).std().iloc[-1] * np.sqrt(252))
         trend_12m = float(pd.Series(returns).sum()) if len(returns) >= 252 else 0.0

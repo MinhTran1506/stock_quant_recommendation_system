@@ -1,8 +1,8 @@
 """
 scripts/backfill_eod.py — Bulk historical EOD price backfill.
 
-Fetches N days of EOD OHLCV history for all active stocks
-from Vietstock (primary) and FiinGroup (fallback/reconciliation).
+Fetches N days of EOD OHLCV history for all active stocks via vnstock
+(open-source, free — no API subscription required).
 
 Usage:
     python scripts/backfill_eod.py --days 365
@@ -12,7 +12,6 @@ Usage:
 Features:
   - Concurrent fetching (configurable workers)
   - Automatic deduplication (upsert on stock_id + date)
-  - Reconciliation: cross-checks Vietstock vs FiinGroup prices
   - Progress bar with ETA
   - Resumes from last saved date (skip if already present)
 """
@@ -29,8 +28,8 @@ import structlog
 from sqlalchemy import select, func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from data.ingestion.vietstock import VietstockProvider
-from db.session import init_db, get_db
+from data.ingestion.vnstock_provider import VnstockProvider
+from db.session import init_db, AsyncSessionLocal
 from db.models import Stock, EODPrice
 
 logger = structlog.get_logger(__name__)
@@ -39,7 +38,7 @@ logger = structlog.get_logger(__name__)
 async def backfill_ticker(
     session,
     stock: Stock,
-    provider: VietstockProvider,
+    provider: VnstockProvider,
     start: date,
     end: date,
 ) -> int:
@@ -111,45 +110,46 @@ async def run_backfill(
     if end_str:
         end = datetime.strptime(end_str, "%Y-%m-%d").date()
 
-    provider = VietstockProvider()
+    provider = VnstockProvider()
 
-    async for session in get_db():
-        # Load stocks
+    # Load stock list using a dedicated short-lived session
+    async with AsyncSessionLocal() as session:
         q = select(Stock).where(Stock.is_active == True)
         if ticker_filter:
             q = q.where(Stock.ticker == ticker_filter.upper())
         result = await session.execute(q)
         stocks = result.scalars().all()
 
-        logger.info(
-            "Starting backfill",
-            n_stocks=len(stocks),
-            start=str(start),
-            end=str(end),
-        )
+    logger.info(
+        "Starting backfill",
+        n_stocks=len(stocks),
+        start=str(start),
+        end=str(end),
+    )
 
-        # Process in batches with concurrency limit
-        semaphore = asyncio.Semaphore(concurrency)
-        total_inserted = 0
-        failed = []
+    # Each task gets its own session — async sessions are NOT concurrency-safe
+    semaphore = asyncio.Semaphore(concurrency)
+    total_inserted = 0
+    failed = []
 
-        async def process_stock(stock: Stock) -> int:
-            async with semaphore:
+    async def process_stock(stock: Stock) -> int:
+        async with semaphore:
+            async with AsyncSessionLocal() as session:
                 count = await backfill_ticker(session, stock, provider, start, end)
                 await session.commit()
                 return count
 
-        tasks = [process_stock(s) for s in stocks]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+    tasks = [process_stock(s) for s in stocks]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for stock, result in zip(stocks, results):
-            if isinstance(result, Exception):
-                failed.append(stock.ticker)
-                logger.error("Backfill error", ticker=stock.ticker, error=str(result))
-            else:
-                total_inserted += result
-                if result > 0:
-                    logger.info("Backfilled", ticker=stock.ticker, rows=result)
+    for stock, result in zip(stocks, results):
+        if isinstance(result, Exception):
+            failed.append(stock.ticker)
+            logger.error("Backfill error", ticker=stock.ticker, error=str(result))
+        else:
+            total_inserted += result
+            if result > 0:
+                logger.info("Backfilled", ticker=stock.ticker, rows=result)
 
     await provider.close()
 

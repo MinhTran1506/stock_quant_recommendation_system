@@ -6,11 +6,24 @@ from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
 
+import jwt as _jwt
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from jose import JWTError, jwt
 from passlib.context import CryptContext
+
+# PyJWT shim — python-jose API-compatible subset
+JWTError = _jwt.PyJWTError
+
+
+class jwt:  # noqa: N801
+    @staticmethod
+    def encode(payload: dict, key: str, algorithm: str = "HS256") -> str:
+        return _jwt.encode(payload, key, algorithm=algorithm)
+
+    @staticmethod
+    def decode(token: str, key: str, algorithms: list) -> dict:
+        return _jwt.decode(token, key, algorithms=algorithms)
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
